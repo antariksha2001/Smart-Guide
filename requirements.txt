@@ -1,0 +1,9 @@
+streamlit
+opencv-python
+numpy
+gTTS
+pygame
+speechrecognition
+tensorflow
+pyttsx3
+easyocr
