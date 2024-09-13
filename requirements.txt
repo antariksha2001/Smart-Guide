@@ -1,9 +1,9 @@
 streamlit
-opencv-python
-numpy
+opencv-python-headless
 gTTS
-pygame
+numpy
 speechrecognition
-tensorflow
-pyttsx3
+Pillow
 easyocr
+streamlit-webrtc
+
