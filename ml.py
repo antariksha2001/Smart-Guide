@@ -5,17 +5,12 @@ import cv2
 import numpy as np
 from gtts import gTTS
 from io import BytesIO
-import pygame
-import time
 import base64
 import speech_recognition as sr
 import threading
-from tensorflow.keras.models import load_model
-import pyttsx3
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase  # For WebRTC
 import easyocr  # Import EasyOCR for text recognition
-
-# Initialize pygame mixer for playing audio
-pygame.mixer.init()
+import tempfile
 
 # Initialize the OCR reader
 reader = easyocr.Reader(['en', 'hi'])  # You can add more languages
@@ -29,11 +24,6 @@ output_layers = [layer_names[i - 1] for i in output_layers_indices.flatten()]
 # Define the classes for YOLO
 with open('https://www.kaggle.com/datasets/valentynsichkar/yolo-coco-data?select=coco.names', 'r') as f:
     classes = f.read().strip().split('\n')
-
-# Global variables for controlling the app
-stop_signal = False
-command = ""
-engine = pyttsx3.init()
 
 # Function to calculate distance (dummy function, modify according to camera specifics)
 def calculate_distance(width, known_width=30, focal_length=700):
@@ -128,21 +118,24 @@ def process_frame(frame, language):
 
     return frame
 
+# Function to speak using gTTS and play sound using HTML audio
 def speak(text, lang='en'):
     tts = gTTS(text=text, lang=lang)
     audio_data = BytesIO()
     tts.write_to_fp(audio_data)
     audio_data.seek(0)
-    pygame.mixer.music.load(audio_data, "mp3")
-    pygame.mixer.music.play()
-
-    while pygame.mixer.music.get_busy():
-        time.sleep(0.1)
+    audio_base64 = base64.b64encode(audio_data.read()).decode()
+    
+    # Display the audio element to play sound on mobile
+    audio_html = f"""
+    <audio autoplay>
+        <source src="data:audio/mp3;base64,{audio_base64}" type="audio/mp3">
+    </audio>
+    """
+    st.markdown(audio_html, unsafe_allow_html=True)
 
 # Streamlit design
 def main():
-    global stop_signal, command
-
     st.set_page_config(page_title="Smart Guide with Text Detection", layout="wide")
 
     # Add a background image
@@ -230,57 +223,39 @@ def main():
     video_source = st.selectbox("Select Video Source", ["Webcam", "Upload Video", "Upload Image"])
 
     if video_source == "Webcam":
-        video_stream = st.checkbox("Start Video Stream")
-        if video_stream:
-            run_webcam(language)
+        webrtc_streamer(key="object_detection", video_transformer_factory=VideoTransformerBase)
 
-    elif video_source == "Upload Video":
-        uploaded_video = st.file_uploader("Choose a video...", type=["mp4", "avi", "mkv", "mov"])
-        if uploaded_video:
-            process_uploaded_video(uploaded_video, language)
+    if video_source == "Upload Video":
+        uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "avi", "mov"])
+        if uploaded_file is not None:
+            with tempfile.NamedTemporaryFile(delete=False) as temp_video:
+                temp_video.write(uploaded_file.read())
+                cap = cv2.VideoCapture(temp_video.name)
 
-    elif video_source == "Upload Image":
-        uploaded_image = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-        if uploaded_image:
-            process_uploaded_image(uploaded_image, language)
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
 
-def run_webcam(language):
-    cap = cv2.VideoCapture(0)
-    stframe = st.empty()
+                    # Process the frame
+                    frame = process_frame(frame, language)
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+                    # Display the frame
+                    st.image(frame, channels="BGR")
 
-        processed_frame = process_frame(frame, language)
-        stframe.image(processed_frame, channels="BGR")
+                cap.release()
 
-    cap.release()
+    if video_source == "Upload Image":
+        uploaded_image = st.file_uploader("Upload an image file", type=["jpg", "jpeg", "png"])
+        if uploaded_image is not None:
+            image = np.array(bytearray(uploaded_image.read()), dtype=np.uint8)
+            image = cv2.imdecode(image, cv2.IMREAD_COLOR)
 
-def process_uploaded_video(uploaded_video, language):
-    temp_file = tempfile.NamedTemporaryFile(delete=False)
-    temp_file.write(uploaded_video.read())
-    cap = cv2.VideoCapture(temp_file.name)
+            # Process the image
+            frame = process_frame(image, language)
 
-    stframe = st.empty()
-
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        processed_frame = process_frame(frame, language)
-        stframe.image(processed_frame, channels="BGR")
-
-    cap.release()
-
-def process_uploaded_image(uploaded_image, language):
-    file_bytes = np.asarray(bytearray(uploaded_image.read()), dtype=np.uint8)
-    image = cv2.imdecode(file_bytes, 1)
-
-    processed_image = process_frame(image, language)
-    st.image(processed_image, channels="BGR")
+            # Display the image
+            st.image(frame, channels="BGR")
 
 if __name__ == "__main__":
     main()
